@@ -15,7 +15,7 @@ import matplotlib.cm as cm
 maxCards = 30
 filename ='image/20180624_163627.jpg' 
 filename ='image/20161020_085332.jpg' 
-maxsize = (640, 480)
+maxsize = (1024, 768)
 
 detectTh = 100
 #-----------------------
@@ -50,7 +50,7 @@ def find_cards(src):
     return area, contours 
 
 def getColor(cm):
-    ret = (cm[0]*255, cm[1]*255, cm[2]*255)
+    ret = (int(cm[0]*255), int(cm[1]*255), int(cm[2]*255))
     return ret
 
 def TransformM(src):
@@ -79,10 +79,19 @@ def TransformM(src):
 
 
 class Application(tkinter.Frame):
+    class RectObj(object):
+        def __init__(self, canvas, points):
+            pass
     def __init__(self, master=None, filename=None):
         tkinter.Frame.__init__(self, master)
         self.grid()
         self.createWidgets()
+
+        self.Objects = []
+        self.lastIndex = 0
+
+        self.dict = {}
+
         if filename:
             self.filename = filename
             self.loadimage()
@@ -101,20 +110,14 @@ class Application(tkinter.Frame):
 
             TH = area[0]*0.5 if len(area) < 3 else area[2]*0.5
 
+            self.displayimage()
             for i, contour in enumerate(contours[0:30]):
                 if area[i] > TH:
                     if len(contour)==4:
                         transform, shape = TransformM(contour)
                         warp = cv2.warpPerspective(self.image, transform,shape)
                         cv2.imwrite("processed/%i.jpg"%i, warp)
-                    self.image = cv2.drawContours(self.image, [contour], -1, getColor(cm.jet((i%10)/10.)), 3)
-
-            self.displayimage()
-            # colorval = "#%02x%02x%02x" % (109, 170, 44)
-            obj1Id = self.canvas.create_oval((10,10,50,50), fill="brown", stipple = "gray25")
-            self.canvas.tag_bind(obj1Id, '<Button-1>', self.canvas_mouse1down_callback)    
-            self.canvas.tag_bind(obj1Id, '<B1-Motion>', self.canvas_mouse1move_callback)    
-            self.canvas.tag_bind(obj1Id, '<ButtonRelease-1>', self.canvas_mouse1up_callback)    
+                        self.createSQ(contour)
 
     def createWidgets(self):
         self.canvas = tkinter.Canvas(self, height = 1, width = 1, relief = tkinter.SUNKEN)
@@ -125,6 +128,23 @@ class Application(tkinter.Frame):
 
         self.canvas3 = tkinter.Canvas(self, height = 1,  width = 1, relief = tkinter.SUNKEN)
         self.canvas3.grid(row = 1, column = 0)
+    
+    def createSQ(self, points):
+        color = "#%02x%02x%02x" % getColor(cm.jet((self.lastIndex%10)/10.))
+
+        _points =list(map(lambda x: (int(x[0][0]/self.scale[0]), int(x[0][1]/self.scale[1]) ), points))
+        rectID = self.canvas.create_polygon(*_points, fill=color, stipple = "gray25", outline="black")
+        self.canvas.tag_bind(rectID, '<ButtonRelease-3>', self.canvas_mouse3up_callback)    
+
+        for i, (x, y) in enumerate(_points):
+            objId = self.canvas.create_oval((x-4, y-4, x+4, y+4), fill=color)
+            self.dict[objId] = (i, rectID)
+            self.canvas.tag_bind(objId, '<Button-1>', self.canvas_mouse1down_callback)    
+            self.canvas.tag_bind(objId, '<B1-Motion>', self.canvas_mouse1move_callback)    
+            self.canvas.tag_bind(objId, '<ButtonRelease-1>', self.canvas_mouse1up_callback)    
+
+        self.Objects.append((self.lastIndex, points, color, rectID))
+        self.lastIndex = self.lastIndex + 1
 
     def loadimage(self):
         self.image = cv2.imread(self.filename)
@@ -150,7 +170,11 @@ class Application(tkinter.Frame):
 
     def canvas_mouse1move_callback(self, event):
         if self.objID == None: return
+        index, rectID = self.dict[self.objID]
         x0, y0, x1, y1 = self.canvas.coords(self.objID)
+        points = self.canvas.coords(rectID)
+        print(points)
+
         deltaX =  event.x - self.objPos[0]
         deltaY =  event.y - self.objPos[1]
         self.canvas.coords(self.objID, 
@@ -158,11 +182,33 @@ class Application(tkinter.Frame):
                             y0 + deltaY,
                             x1 + deltaX,
                             y1 + deltaY)
+        points[index*2] = points[index*2] + deltaX
+        points[index*2 + 1] = points[index*2 + 1] + deltaY
+        self.canvas.coords(rectID, *points)
+
         self.objPos = (event.x, event.y)
 
     def canvas_mouse1up_callback(self, event):
         self.objID = None
 
+    def canvas_mouse3up_callback(self, event):
+        objID = self.canvas.find_closest(event.x, event.y)[0]
+
+        keys = []
+        for key, value in self.dict.items():
+            if value[1] != objID:
+                continue
+            self.canvas.delete(key)
+            keys.append(key)
+        for key in keys:
+            del(self.dict[key])
+
+        self.canvas.delete(objID)
+        for i, item in enumerate(self.Objects):
+            print(item)
+            if item[3] == objID:
+                del(self.Objects[i])
+                print(i, objID,item)
 
 class Rect(object):
     def __init__(self, *args):
